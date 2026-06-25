@@ -30,6 +30,11 @@ const CACHE_SECONDS   = 60;                            // re-check PC at most on
 const ALLOWED_ORIGIN  = process.env.ALLOWED_ORIGIN || "";
 const WIDGET_TOKEN    = process.env.WIDGET_TOKEN || "";
 
+// Staff prayer requests come from a Google Form. Publish its responses sheet
+// to the web as CSV (File → Share → Publish to web → CSV) and put that link
+// here. Leave blank until you're ready — the Staff column just stays empty.
+const GOOGLE_CSV_URL  = process.env.GOOGLE_CSV_URL || "";
+
 if (!PCO_APP_ID || !PCO_SECRET) {
   console.warn("⚠️  PCO_APP_ID / PCO_SECRET not set — the wall will have no data.");
 }
@@ -107,11 +112,13 @@ let cache = { at: 0, data: [] };
 app.get("/api/requests", allowData, async (req, res) => {
   try {
     if (Date.now() - cache.at < CACHE_SECONDS * 1000) return res.json(cache.data);
-    const data = await fetchPlanningCenter();
+    const [congregation, staff] = await Promise.all([fetchPlanningCenter(), fetchGoogle()]);
+    const data = [...congregation, ...staff]
+      .sort((a, b) => new Date(b.submitted) - new Date(a.submitted));
     cache = { at: Date.now(), data };
     res.json(data);
   } catch (err) {
-    console.error("PC fetch failed:", err.message);
+    console.error("Fetch failed:", err.message);
     // serve last good data if we have it, so the wall never goes blank
     res.json(cache.data);
   }
@@ -226,6 +233,59 @@ async function fetchPlanningCenter() {
   }).filter(r => r.request); // only show entries that actually have a request
 }
 
+// ── Staff requests from a published Google Form responses sheet (CSV) ─────────
+function parseCSV(text) {
+  const rows = []; let row = [], cur = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; }
+      else cur += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") { row.push(cur); cur = ""; }
+    else if (c === "\n") { row.push(cur); rows.push(row); row = []; cur = ""; }
+    else if (c !== "\r") cur += c;
+  }
+  if (cur.length || row.length) { row.push(cur); rows.push(row); }
+  return rows;
+}
+
+async function fetchGoogle() {
+  if (!GOOGLE_CSV_URL) return [];                 // staff source not connected yet
+  try {
+    const r = await fetch(GOOGLE_CSV_URL);
+    if (!r.ok) throw new Error("CSV " + r.status);
+    const rows = parseCSV(await r.text());
+    if (rows.length < 2) return [];
+    const headers = rows[0].map(h => h.toLowerCase().trim());
+    const find = re => headers.findIndex(h => re.test(h));
+    const iName = find(/name/);
+    const iLoc  = find(/city|state|location|address|from|where/);
+    const iReq  = find(/request|prayer|pray|need|how/);
+    const iTime = find(/time|date|stamp/);
+
+    return rows.slice(1).filter(cells => cells.some(c => c && c.trim())).map(cells => {
+      const request = (iReq >= 0 ? cells[iReq] : "") || "";
+      let submitted = new Date().toISOString();
+      if (iTime >= 0 && cells[iTime]) {
+        const d = new Date(cells[iTime]);
+        if (!isNaN(d)) submitted = d.toISOString();
+      }
+      return {
+        name: ((iName >= 0 ? cells[iName] : "") || "Anonymous").trim(),
+        location: cityState(iLoc >= 0 ? cells[iLoc] : ""),
+        request: request.trim(),
+        submitted,
+        urgent: /urgent|emergency|surgery|icu|critical/i.test(request),
+        source: "Staff",
+      };
+    }).filter(r => r.request);
+  } catch (e) {
+    console.error("Google CSV failed:", e.message);
+    return [];
+  }
+}
+
 // ── The wall page (served at "/", behind the password) ───────────────────────
 const WALL_HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -246,16 +306,23 @@ const WALL_HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   .dot{width:8px;height:8px;border-radius:50%;background:#5bd17e;box-shadow:0 0 0 0 rgba(91,209,126,.6);animation:pulse 2.2s infinite}
   @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(91,209,126,.5)}70%{box-shadow:0 0 0 9px rgba(91,209,126,0)}100%{box-shadow:0 0 0 0 rgba(91,209,126,0)}}
   .count strong{color:var(--rt-white)}
-  .wrap{max-width:660px;margin:0 auto;padding:24px 18px 70px}
-  .req{background:var(--rt-white);border:1px solid #e3d8c6;border-left:4px solid var(--rt-navy);border-radius:12px;padding:18px 20px;margin:14px 0;box-shadow:0 1px 3px rgba(27,27,27,.06)}
+  .wrap{max-width:1040px;margin:0 auto;padding:24px 18px 70px}
+  .columns{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+  @media(max-width:760px){.columns{grid-template-columns:1fr}}
+  .col-head{display:flex;align-items:baseline;justify-content:space-between;
+    border-bottom:2px solid #d8cab2;padding:0 2px 8px;margin-bottom:4px}
+  .col-head h2{font-family:'Playfair Display',serif;font-size:1.3rem;color:var(--rt-navy)}
+  .col-head .n{font-size:.8rem;color:var(--rt-slate);font-weight:600}
+  .req{background:var(--rt-white);border:1px solid #e3d8c6;border-left:4px solid var(--rt-navy);border-radius:12px;padding:16px 18px;margin:14px 0;box-shadow:0 1px 3px rgba(27,27,27,.06)}
+  .col-staff .req{border-left-color:#3f7d63}
   .req.urgent{border-left-color:var(--rt-red)}
   .req .top{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
-  .req .name{font-size:1.14rem;font-weight:700;color:var(--rt-navy)}
-  .req .loc{font-size:.82rem;color:var(--rt-slate);font-weight:600;display:block;margin-top:2px}
-  .req .ago{font-size:.74rem;color:var(--rt-slate);white-space:nowrap;flex-shrink:0;font-weight:500}
-  .req .request{margin-top:12px;font-size:1.04rem;color:var(--rt-black)}
+  .req .name{font-size:1.1rem;font-weight:700;color:var(--rt-navy)}
+  .req .loc{font-size:.8rem;color:var(--rt-slate);font-weight:600;display:block;margin-top:2px}
+  .req .ago{font-size:.72rem;color:var(--rt-slate);white-space:nowrap;flex-shrink:0;font-weight:500}
+  .req .request{margin-top:11px;font-size:1.0rem;color:var(--rt-black)}
   .badge{display:inline-block;font-size:.64rem;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--rt-white);background:var(--rt-red);padding:3px 9px;border-radius:999px;margin-bottom:9px}
-  .empty{text-align:center;color:var(--rt-slate);padding:50px 20px}
+  .empty{text-align:center;color:var(--rt-slate);padding:36px 14px;font-size:.9rem;border:1px dashed #d8cab2;border-radius:12px;margin-top:14px}
   footer{text-align:center;color:var(--rt-slate);font-size:.78rem;padding:24px 18px 40px}
   footer a{color:var(--rt-red);text-decoration:none;font-weight:600}
 </style></head><body>
@@ -267,8 +334,19 @@ const WALL_HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
     <div class="statusbar"><span class="live"><span class="dot"></span> Live</span>
       <span class="count"><strong id="num">—</strong> requests</span></div>
   </header>
-  <main class="wrap" id="list"><div class="empty">Loading prayer requests…</div></main>
-  <footer>Pulled automatically from Church Center · updated <span id="time">—</span> · <a href="/logout">Sign out</a><br>
+  <main class="wrap">
+    <div class="columns">
+      <section class="col-cong">
+        <div class="col-head"><h2>Congregation</h2><span class="n" id="n-cong">—</span></div>
+        <div id="list-cong"><div class="empty">Loading…</div></div>
+      </section>
+      <section class="col-staff">
+        <div class="col-head"><h2>Staff</h2><span class="n" id="n-staff">—</span></div>
+        <div id="list-staff"><div class="empty">Loading…</div></div>
+      </section>
+    </div>
+  </main>
+  <footer>Congregation from Church Center · Staff from the staff form · updated <span id="time">—</span> · <a href="/logout">Sign out</a><br>
     Need prayer? Email <a href="mailto:prayer@revivaltoday.com">prayer@revivaltoday.com</a> or text PRAYER to 75767</footer>
 <script>
   function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML;}
@@ -276,18 +354,25 @@ const WALL_HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
     if(s<60)return'just now';if(s<3600)return Math.floor(s/60)+' min ago';
     if(s<86400)return Math.floor(s/3600)+' hr ago';if(s<172800)return'yesterday';
     return Math.floor(s/86400)+' days ago';}
+  function card(r){
+    return '<article class="req'+(r.urgent?' urgent':'')+'">'
+      +(r.urgent?'<span class="badge">Urgent</span>':'')
+      +'<div class="top"><div><span class="name">'+esc(r.name)+'</span>'
+      +(r.location?'<span class="loc">'+esc(r.location)+'</span>':'')+'</div>'
+      +'<span class="ago">'+ago(r.submitted)+'</span></div>'
+      +'<p class="request">'+esc(r.request)+'</p></article>';}
+  function fill(id,items,emptyMsg){
+    var el=document.getElementById(id);
+    el.innerHTML=items.length?items.map(card).join(''):'<div class="empty">'+emptyMsg+'</div>';}
   function render(items){
+    var cong=items.filter(function(r){return r.source!=='Staff';});
+    var staff=items.filter(function(r){return r.source==='Staff';});
     document.getElementById('num').textContent=items.length;
+    document.getElementById('n-cong').textContent=cong.length;
+    document.getElementById('n-staff').textContent=staff.length;
     document.getElementById('time').textContent=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
-    var list=document.getElementById('list');
-    if(!items.length){list.innerHTML='<div class="empty">No prayer requests yet.</div>';return;}
-    list.innerHTML=items.map(function(r){
-      return '<article class="req'+(r.urgent?' urgent':'')+'">'
-        +(r.urgent?'<span class="badge">Urgent</span>':'')
-        +'<div class="top"><div><span class="name">'+esc(r.name)+'</span>'
-        +(r.location?'<span class="loc">'+esc(r.location)+'</span>':'')+'</div>'
-        +'<span class="ago">'+ago(r.submitted)+'</span></div>'
-        +'<p class="request">'+esc(r.request)+'</p></article>';}).join('');}
+    fill('list-cong',cong,'No requests yet.');
+    fill('list-staff',staff,'No staff requests yet.');}
   function load(){fetch('/api/requests',{credentials:'same-origin'})
     .then(function(res){if(res.status===401){location.href='/login';return null;}return res.json();})
     .then(function(d){if(d)render(d);}).catch(function(){});}
