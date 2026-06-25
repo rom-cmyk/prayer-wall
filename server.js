@@ -272,7 +272,7 @@ async function fetchGoogle() {
         if (!isNaN(d)) submitted = d.toISOString();
       }
       return {
-        name: ((iName >= 0 ? cells[iName] : "") || "Anonymous").trim(),
+        name: (iName >= 0 ? cells[iName] : "").trim(),   // staff form has no name column — leave blank
         location: cityState(iLoc >= 0 ? cells[iLoc] : ""),
         request: request.trim(),
         submitted,
@@ -323,8 +323,23 @@ const WALL_HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   .req .request{margin-top:11px;font-size:1.0rem;color:var(--rt-black)}
   .badge{display:inline-block;font-size:.64rem;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--rt-white);background:var(--rt-red);padding:3px 9px;border-radius:999px;margin-bottom:9px}
   .empty{text-align:center;color:var(--rt-slate);padding:36px 14px;font-size:.9rem;border:1px dashed #d8cab2;border-radius:12px;margin-top:14px}
+  .req.noname .top{margin-bottom:2px}
+  .req.noname .request{margin-top:0;font-weight:500;font-size:1.05rem}
   footer{text-align:center;color:var(--rt-slate);font-size:.78rem;padding:24px 18px 40px}
   footer a{color:var(--rt-red);text-decoration:none;font-weight:600}
+  @media(max-width:600px){
+    header{padding:24px 16px 20px}
+    header img.logo{height:38px;margin-bottom:12px}
+    header h1{font-size:1.65rem}
+    header p.sub{font-size:.84rem}
+    .statusbar{flex-wrap:wrap;gap:10px 16px}
+    .wrap{padding:16px 13px 56px}
+    .columns{gap:8px}
+    .col-head{margin-top:6px}
+    .col-head h2{font-size:1.15rem}
+    .req{padding:14px 16px;margin:11px 0}
+    .req .request{font-size:1rem}
+  }
 </style></head><body>
   <header>
     <img class="logo" src="https://cdn.prod.website-files.com/69b205b04fb55ca6c4693af9/69b27bf1c55d9cb1a6bb20a6_RTLogo_SideTextBlack%20(1).png" alt="Revival Today">
@@ -355,10 +370,11 @@ const WALL_HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
     if(s<86400)return Math.floor(s/3600)+' hr ago';if(s<172800)return'yesterday';
     return Math.floor(s/86400)+' days ago';}
   function card(r){
-    return '<article class="req'+(r.urgent?' urgent':'')+'">'
+    var who=r.name?('<span class="name">'+esc(r.name)+'</span>'
+      +(r.location?'<span class="loc">'+esc(r.location)+'</span>':'')):'';
+    return '<article class="req'+(r.urgent?' urgent':'')+(r.name?'':' noname')+'">'
       +(r.urgent?'<span class="badge">Urgent</span>':'')
-      +'<div class="top"><div><span class="name">'+esc(r.name)+'</span>'
-      +(r.location?'<span class="loc">'+esc(r.location)+'</span>':'')+'</div>'
+      +'<div class="top"><div>'+who+'</div>'
       +'<span class="ago">'+ago(r.submitted)+'</span></div>'
       +'<p class="request">'+esc(r.request)+'</p></article>';}
   function fill(id,items,emptyMsg){
