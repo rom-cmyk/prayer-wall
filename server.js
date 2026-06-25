@@ -307,8 +307,8 @@ const WALL_HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(91,209,126,.5)}70%{box-shadow:0 0 0 9px rgba(91,209,126,0)}100%{box-shadow:0 0 0 0 rgba(91,209,126,0)}}
   .count strong{color:var(--rt-white)}
   .wrap{max-width:1040px;margin:0 auto;padding:24px 18px 70px}
-  .columns{display:grid;grid-template-columns:1fr 1fr;gap:22px}
-  @media(max-width:760px){.columns{grid-template-columns:1fr}}
+  .columns{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+  @media(max-width:760px){.columns{gap:10px}}
   .col-head{display:flex;align-items:baseline;justify-content:space-between;
     border-bottom:2px solid #d8cab2;padding:0 2px 8px;margin-bottom:4px}
   .col-head h2{font-family:'Playfair Display',serif;font-size:1.3rem;color:var(--rt-navy)}
@@ -328,17 +328,25 @@ const WALL_HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   footer{text-align:center;color:var(--rt-slate);font-size:.78rem;padding:24px 18px 40px}
   footer a{color:var(--rt-red);text-decoration:none;font-weight:600}
   @media(max-width:600px){
-    header{padding:24px 16px 20px}
-    header img.logo{height:38px;margin-bottom:12px}
-    header h1{font-size:1.65rem}
-    header p.sub{font-size:.84rem}
-    .statusbar{flex-wrap:wrap;gap:10px 16px}
-    .wrap{padding:16px 13px 56px}
-    .columns{gap:8px}
-    .col-head{margin-top:6px}
-    .col-head h2{font-size:1.15rem}
-    .req{padding:14px 16px;margin:11px 0}
-    .req .request{font-size:1rem}
+    header{padding:20px 14px 16px}
+    header img.logo{height:34px;margin-bottom:10px}
+    header h1{font-size:1.5rem}
+    header p.sub{font-size:.8rem}
+    .statusbar{flex-wrap:wrap;gap:8px 14px;margin-top:12px}
+    .wrap{padding:14px 9px 50px}
+    .columns{gap:8px}                       /* keep TWO columns side by side */
+    .col-head{padding-bottom:6px}
+    .col-head h2{font-size:1rem}
+    .col-head .n{font-size:.72rem}
+    .req{padding:10px 11px;margin:8px 0;border-radius:10px;border-left-width:3px}
+    .req .top{gap:6px}
+    .req .name{font-size:.9rem}
+    .req .loc{font-size:.7rem}
+    .req .ago{font-size:.64rem}
+    .req .request{font-size:.85rem;margin-top:7px}
+    .req.noname .request{font-size:.9rem}
+    .badge{font-size:.56rem;padding:2px 6px;margin-bottom:6px}
+    .empty{padding:24px 8px;font-size:.8rem}
   }
 </style></head><body>
   <header>
@@ -352,7 +360,7 @@ const WALL_HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   <main class="wrap">
     <div class="columns">
       <section class="col-cong">
-        <div class="col-head"><h2>Congregation</h2><span class="n" id="n-cong">—</span></div>
+        <div class="col-head"><h2>General</h2><span class="n" id="n-cong">—</span></div>
         <div id="list-cong"><div class="empty">Loading…</div></div>
       </section>
       <section class="col-staff">
@@ -361,7 +369,7 @@ const WALL_HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
       </section>
     </div>
   </main>
-  <footer>Congregation from Church Center · Staff from the staff form · updated <span id="time">—</span> · <a href="/logout">Sign out</a><br>
+  <footer>General from Church Center · Staff from the staff form · updated <span id="time">—</span> · <a href="/logout">Sign out</a><br>
     Need prayer? Email <a href="mailto:prayer@revivaltoday.com">prayer@revivaltoday.com</a> or text PRAYER to 75767</footer>
 <script>
   function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML;}
@@ -381,7 +389,7 @@ const WALL_HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
     var el=document.getElementById(id);
     el.innerHTML=items.length?items.map(card).join(''):'<div class="empty">'+emptyMsg+'</div>';}
   function render(items){
-    var cong=items.filter(function(r){return r.source!=='Staff';});
+    var cong=items.filter(function(r){return r.source!=='Staff';}).slice(0,20); // newest 20 only
     var staff=items.filter(function(r){return r.source==='Staff';});
     document.getElementById('num').textContent=items.length;
     document.getElementById('n-cong').textContent=cong.length;
