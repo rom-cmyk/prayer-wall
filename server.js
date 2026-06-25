@@ -18,7 +18,8 @@ import crypto from "crypto";
 // ── Config (from environment variables) ──────────────────────────────────────
 const PCO_APP_ID     = process.env.PCO_APP_ID;        // Planning Center Application ID
 const PCO_SECRET     = process.env.PCO_SECRET;        // Planning Center Secret
-const PCO_FORM_ID    = process.env.PCO_FORM_ID || "872511";
+const PCO_FORM_ID       = process.env.PCO_FORM_ID || "872511";        // general / congregation form
+const PCO_STAFF_FORM_ID = process.env.PCO_STAFF_FORM_ID || "1256657"; // staff prayer form
 const SHARED_PASSWORD = process.env.SHARED_PASSWORD;  // the one team password
 const SESSION_SECRET  = process.env.SESSION_SECRET || "change-me-please";
 const PORT            = process.env.PORT || 3000;
@@ -112,8 +113,12 @@ let cache = { at: 0, data: [] };
 app.get("/api/requests", allowData, async (req, res) => {
   try {
     if (Date.now() - cache.at < CACHE_SECONDS * 1000) return res.json(cache.data);
-    const [congregation, staff] = await Promise.all([fetchPlanningCenter(), fetchGoogle()]);
-    const data = [...congregation, ...staff]
+    const [congregation, staffPC, staffGoogle] = await Promise.all([
+      fetchPlanningCenter(),   // general form  -> General column
+      fetchStaff(),            // staff PC form -> Staff column
+      fetchGoogle(),           // optional Google source -> Staff column (usually empty)
+    ]);
+    const data = [...congregation, ...staffPC, ...staffGoogle]
       .sort((a, b) => new Date(b.submitted) - new Date(a.submitted));
     cache = { at: Date.now(), data };
     res.json(data);
@@ -126,7 +131,8 @@ app.get("/api/requests", allowData, async (req, res) => {
 
 // ── Debug: see the form's field labels (helps map name/city/request) ─────────
 app.get("/api/fields", allowData, async (req, res) => {
-  const r = await pco(`/forms/${PCO_FORM_ID}/fields?per_page=100`);
+  const form = req.query.form || PCO_FORM_ID;   // ?form=1256657 to inspect the staff form
+  const r = await pco(`/forms/${form}/fields?per_page=100`);
   res.json((r.data || []).map(f => ({ id: f.id, label: f.attributes?.label })));
 });
 
@@ -146,6 +152,14 @@ function classifyFields(fields) {
     if (!map.location && /(city|state|location|where|country|region|address)/.test(label)) map.location = f.id;
     if (!map.request  && /(how can we|how may we|prayer request|pray for)/.test(label))     map.request  = f.id;
     if (!map.name     && /\bname\b/.test(label))                                      map.name     = f.id;
+  }
+  // Fallback: if no strict request match (e.g. the staff form labels it simply
+  // "Request" or "Prayer point"), accept a looser match.
+  if (!map.request) {
+    for (const f of fields) {
+      const label = (f.attributes?.label || "").toLowerCase();
+      if (/(request|prayer|pray|petition|need|how can)/.test(label)) { map.request = f.id; break; }
+    }
   }
   return map;
 }
@@ -179,20 +193,19 @@ function cityState(raw) {
   return state ? `${city}, ${state}` : city;
 }
 
-async function fetchPlanningCenter() {
-  // 1) field labels -> ids
-  const fieldsResp = await pco(`/forms/${PCO_FORM_ID}/fields?per_page=100`);
+// Read any Planning Center form. showName=true shows submitter name + city/state
+// (congregation); showName=false shows just the request text (staff form).
+async function fetchForm(formId, source, showName) {
+  const fieldsResp = await pco(`/forms/${formId}/fields?per_page=100`);
   const fieldMap = classifyFields(fieldsResp.data || []);
 
-  // 2) latest submissions, with their answers + the submitter
   const subs = await pco(
-    `/forms/${PCO_FORM_ID}/form_submissions` +
+    `/forms/${formId}/form_submissions` +
     `?include=form_submission_values,person&order=-created_at&per_page=50`
   );
 
-  // index the included resources.
-  // Group each answer under its OWN submission id (the value points back to its
-  // submission), which is more reliable than reading it off the submission.
+  // Group each answer under its OWN submission id (more reliable than reading
+  // the relationship off the submission).
   const valuesBySub = {}, people = {};
   for (const inc of subs.included || []) {
     if (inc.type === "FormSubmissionValue") {
@@ -212,26 +225,31 @@ async function fetchPlanningCenter() {
   };
 
   return (subs.data || []).map(sub => {
-    const personId = sub.relationships?.person?.data?.id;
-    const person   = personId ? people[personId] : null;
-    const personName = person
-      ? [person.attributes?.first_name, person.attributes?.last_name].filter(Boolean).join(" ")
-      : "";
-
-    const name = valueFor(sub, fieldMap.name) || personName || "Anonymous";
-    const location = cityState(valueFor(sub, fieldMap.location));
+    let name = "";
+    if (showName) {
+      const personId = sub.relationships?.person?.data?.id;
+      const person   = personId ? people[personId] : null;
+      const personName = person
+        ? [person.attributes?.first_name, person.attributes?.last_name].filter(Boolean).join(" ")
+        : "";
+      name = valueFor(sub, fieldMap.name) || personName || "Anonymous";
+    }
+    const location = showName ? cityState(valueFor(sub, fieldMap.location)) : "";
     const request  = valueFor(sub, fieldMap.request);
 
     return {
       name: name.trim(),
-      location: location.trim(),
+      location: (location || "").trim(),
       request: request.trim(),
       submitted: sub.attributes?.created_at,
       urgent: /urgent|emergency|surgery|icu|critical/i.test(request),
-      source: "Church Center",
+      source,
     };
   }).filter(r => r.request); // only show entries that actually have a request
 }
+
+function fetchPlanningCenter() { return fetchForm(PCO_FORM_ID, "Church Center", true); }
+function fetchStaff()          { return fetchForm(PCO_STAFF_FORM_ID, "Staff", false); }
 
 // ── Staff requests from a published Google Form responses sheet (CSV) ─────────
 function parseCSV(text) {
