@@ -136,8 +136,8 @@ function classifyFields(fields) {
   const map = { location: null, request: null, name: null };
   for (const f of fields) {
     const label = (f.attributes?.label || "").toLowerCase();
-    if (!map.location && /(city|state|location|where|country|region)/.test(label)) map.location = f.id;
-    if (!map.request  && /(request|prayer|pray|need|how can we)/.test(label))       map.request  = f.id;
+    if (!map.location && /(city|state|location|where|country|region|address)/.test(label)) map.location = f.id;
+    if (!map.request  && /(how can we|how may we|prayer request|pray for)/.test(label))     map.request  = f.id;
     if (!map.name     && /\bname\b/.test(label))                                      map.name     = f.id;
   }
   return map;
