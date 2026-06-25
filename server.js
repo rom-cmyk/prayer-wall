@@ -143,6 +143,35 @@ function classifyFields(fields) {
   return map;
 }
 
+// Reduce a Planning Center address to just "City, State" for privacy.
+// PC address display looks like "Home: 4628 Blackberry Patch Rd Henrico, VA 23231 United States".
+function cityState(raw) {
+  if (!raw) return "";
+  let s = String(raw).replace(/^\s*(home|work|other|mailing)\s*:\s*/i, "").trim();
+  if (!s.includes(",")) return s;                         // not a full address — show as-is
+  const i = s.indexOf(",");
+  let before = s.slice(0, i);
+  let after  = s.slice(i + 1);
+
+  // City = whatever follows the last street-suffix token (St, Ave, Rd, ...).
+  const suffix = /\b(st|street|ave|avenue|rd|road|dr|drive|blvd|boulevard|ln|lane|way|ct|court|pl|place|cir|circle|trl|trail|hwy|highway|pkwy|parkway|ter|terrace|loop|run|pike|row|sq|square|apt|unit|ste|suite)\b\.?/ig;
+  let m, cut = -1, cutLen = 0;
+  while ((m = suffix.exec(before))) { cut = m.index; cutLen = m[0].length; }
+  let city = cut >= 0 ? before.slice(cut + cutLen) : before;
+  city = city.replace(/^[\s,]*[\d#-]+\s*/, "").trim();    // drop leading unit numbers
+  if (!city) city = before.trim().split(/\s+/).pop() || "";
+
+  // State = first non-numeric token(s) after the comma, stop at zip / country.
+  const stateTokens = [];
+  for (const tok of after.trim().split(/\s+/)) {
+    if (/\d/.test(tok)) break;
+    if (/^(united|usa|us|states|canada|mexico|uk|kingdom)$/i.test(tok)) break;
+    stateTokens.push(tok);
+  }
+  const state = stateTokens.join(" ");
+  return state ? `${city}, ${state}` : city;
+}
+
 async function fetchPlanningCenter() {
   // 1) field labels -> ids
   const fieldsResp = await pco(`/forms/${PCO_FORM_ID}/fields?per_page=100`);
@@ -183,7 +212,7 @@ async function fetchPlanningCenter() {
       : "";
 
     const name = valueFor(sub, fieldMap.name) || personName || "Anonymous";
-    const location = valueFor(sub, fieldMap.location);
+    const location = cityState(valueFor(sub, fieldMap.location));
     const request  = valueFor(sub, fieldMap.request);
 
     return {
