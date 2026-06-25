@@ -1,0 +1,17 @@
+{
+  "name": "revival-today-prayer-wall",
+  "version": "1.0.0",
+  "description": "Password-protected prayer wall that reads requests from Planning Center / Church Center form 872511.",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.6",
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
